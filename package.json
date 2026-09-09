@@ -1,0 +1,38 @@
+{
+  "name": "conversor-de-moedas",
+  "version": "1.0.0",
+  "description": "API REST de conversao de moedas - projeto pratico da disciplina de DevOps (PUCPR)",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "jest",
+    "test:coverage": "jest --coverage"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "!src/server.js"
+    ]
+  },
+  "keywords": [
+    "devops",
+    "express",
+    "docker",
+    "github-actions",
+    "ci-cd"
+  ],
+  "author": "Gustavo Dambros",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.1.1"
+  }
+}
