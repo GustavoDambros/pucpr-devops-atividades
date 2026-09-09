@@ -8,6 +8,10 @@ on:
     branches: ['**']
   pull_request:
     branches: ['**']
+    # Estes três já são o padrão do GitHub para pull_request, mas ficam
+    # explícitos porque "synchronize" é o que importa aqui: é ele que dispara
+    # a suíte de novo a cada novo commit enviado a uma PR já aberta.
+    types: [opened, synchronize, reopened]
   workflow_call:
 
 permissions:
