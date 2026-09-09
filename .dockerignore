@@ -1,0 +1,26 @@
+# Dependências: reinstaladas dentro da imagem a partir do lockfile
+node_modules
+npm-debug.log*
+
+# Artefatos de teste
+coverage
+
+# Metadados de versionamento e CI/CD
+.git
+.gitignore
+.github
+
+# Testes e documentação não fazem parte da imagem de produção
+tests
+*.md
+
+# Configuração local
+.env
+.env.*
+.vscode
+.idea
+
+# Arquivos do próprio Docker
+Dockerfile
+.dockerignore
+compose.yaml

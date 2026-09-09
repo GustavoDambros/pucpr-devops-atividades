@@ -1,0 +1,72 @@
+name: CI
+
+# Roda em todo push e em toda pull request. O gatilho workflow_call permite
+# que o pipeline de CD reutilize este mesmo workflow como porta de qualidade,
+# em vez de duplicar os passos de build e teste.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build e testes (Node ${{ matrix.node-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22.x', '24.x']
+
+    steps:
+      - name: Baixa o código do repositório
+        uses: actions/checkout@v4
+
+      - name: Configura o Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Instala as dependências a partir do lockfile
+        run: npm ci
+
+      - name: Executa os testes com cobertura
+        run: npm run test:coverage
+
+      - name: Sobe a API e valida os endpoints (smoke test)
+        run: |
+          npm start > /tmp/app.log 2>&1 &
+          echo $! > /tmp/app.pid
+
+          for tentativa in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health > /dev/null 2>&1; then
+              echo "API respondeu ao health check na tentativa ${tentativa}."
+              break
+            fi
+            if [ "${tentativa}" -eq 30 ]; then
+              echo "::error::A API não respondeu ao health check em 30 segundos."
+              cat /tmp/app.log
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "Conversão de exemplo (10 USD -> BRL):"
+          curl -fsS "http://localhost:3000/api/convert?from=USD&to=BRL&amount=10"
+          echo
+
+          kill "$(cat /tmp/app.pid)"
+
+      - name: Guarda o relatório de cobertura como artefato
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-node-${{ matrix.node-version }}
+          path: coverage/
+          retention-days: 7

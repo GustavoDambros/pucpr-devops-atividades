@@ -1,0 +1,15 @@
+# Atalho para subir a aplicação localmente sem decorar as flags do docker run:
+#   docker compose up --build
+#
+# A porta do host é configurável para não colidir com outros serviços:
+#   HOST_PORT=3030 docker compose up --build
+services:
+  api:
+    build: .
+    image: conversor-de-moedas:local
+    container_name: conversor-de-moedas
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
