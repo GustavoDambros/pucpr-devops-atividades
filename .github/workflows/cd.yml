@@ -1,0 +1,172 @@
+name: CD
+
+# Entrega contínua. Só avança depois que o CI passa: em vez de duplicar os
+# passos de build e teste, o primeiro job reutiliza o próprio ci.yml
+# (workflow_call). Os jobs seguintes declaram "needs", então nada é construído
+# ou entregue com a suíte vermelha.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  quality-gate:
+    name: Porta de qualidade
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    name: Imagem Docker
+    needs: quality-gate
+    runs-on: ubuntu-latest
+
+    outputs:
+      name: ${{ steps.image-name.outputs.value }}
+      digest: ${{ steps.publish.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+
+    steps:
+      - name: Baixa o código do repositório
+        uses: actions/checkout@v4
+
+      - name: Normaliza o nome da imagem para minúsculo
+        id: image-name
+        # O GHCR só aceita nomes de repositório em minúsculo.
+        run: echo "value=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Configura o Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Calcula tags e labels da imagem
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.value }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Constrói a imagem e carrega no daemon do runner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: conversor-de-moedas:ci
+
+      - name: Sobe o container e valida a imagem construída
+        run: |
+          docker run -d --name smoke -p 3000:3000 conversor-de-moedas:ci
+
+          for tentativa in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health > /dev/null 2>&1; then
+              echo "Container respondeu ao health check na tentativa ${tentativa}."
+              break
+            fi
+            if [ "${tentativa}" -eq 30 ]; then
+              echo "::error::O container não respondeu ao health check em 30 segundos."
+              docker logs smoke
+              exit 1
+            fi
+            sleep 1
+          done
+
+          echo "Conversão de exemplo a partir do container:"
+          curl -fsS "http://localhost:3000/api/convert?from=USD&to=BRL&amount=10"
+          echo
+          docker container rm --force smoke
+
+      - name: Autentica no GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publica a imagem no GHCR
+        id: publish
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    name: Entrega
+    needs: image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Autentica no GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Valida a imagem publicada antes de liberá-la
+        if: github.event_name == 'push'
+        env:
+          IMAGEM: ${{ needs.image.outputs.name }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          REFERENCIA="${REGISTRY}/${IMAGEM}@${DIGEST}"
+          echo "Baixando a imagem entregue: ${REFERENCIA}"
+          docker pull "${REFERENCIA}"
+          docker run -d --name entrega -p 3000:3000 "${REFERENCIA}"
+
+          for tentativa in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/health > /dev/null 2>&1; then
+              echo "A imagem publicada subiu e respondeu ao health check."
+              break
+            fi
+            if [ "${tentativa}" -eq 30 ]; then
+              echo "::error::A imagem publicada não respondeu ao health check."
+              docker logs entrega
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker container rm --force entrega
+
+      - name: Publica o resumo da entrega
+        env:
+          IMAGEM: ${{ needs.image.outputs.name }}
+          TAGS: ${{ needs.image.outputs.tags }}
+        run: |
+          {
+            echo "## Entrega contínua"
+            echo
+            if [ "${{ github.event_name }}" = "push" ]; then
+              echo "Imagem publicada e validada no GitHub Container Registry."
+              echo
+              echo "Tags entregues:"
+              echo
+              echo '```'
+              echo "${TAGS}"
+              echo '```'
+              echo
+              echo "Para rodar a versão entregue:"
+              echo
+              echo '```bash'
+              echo "docker run -d -p 3000:3000 ${REGISTRY}/${IMAGEM}:latest"
+              echo '```'
+            else
+              echo "Execução em pull request: a imagem foi construída e validada com"
+              echo "sucesso, mas a publicação no registry só acontece após o merge"
+              echo "em \`main\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
