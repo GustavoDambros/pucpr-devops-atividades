@@ -28,4 +28,32 @@ describe('parseConversionInput', () => {
   it('informa quais moedas existem quando a moeda é inválida', () => {
     expect(() => parseConversionInput({ from: 'USD', to: 'XYZ', amount: 1 })).toThrow(/Moedas disponíveis/);
   });
+
+  it('aceita zero como valor a converter', () => {
+    // Zero é falsy: um "if (!amount)" ingênuo recusaria uma conversão válida.
+    expect(parseConversionInput({ from: 'USD', to: 'BRL', amount: 0 }).amount).toBe(0);
+  });
+
+  it('aceita o valor como texto, que é como ele chega pela query string', () => {
+    expect(parseConversionInput({ from: 'USD', to: 'BRL', amount: '12.5' }).amount).toBe(12.5);
+  });
+
+  it('exige "from" quando é chamada sem argumento nenhum', () => {
+    expect(() => parseConversionInput()).toThrow(/"from" é obrigatório/);
+  });
+
+  it('rejeita o mesmo parâmetro repetido na query string', () => {
+    // ?from=USD&from=EUR chega ao Express como array.
+    expect(() => parseConversionInput({ from: ['USD', 'EUR'], to: 'BRL', amount: 1 }))
+      .toThrow(ValidationError);
+  });
+
+  it.each([
+    ['Infinity', Infinity],
+    ['-Infinity', -Infinity],
+    ['NaN', NaN],
+  ])('rejeita %s, que não representa dinheiro', (_descricao, valor) => {
+    expect(() => parseConversionInput({ from: 'USD', to: 'BRL', amount: valor }))
+      .toThrow(ValidationError);
+  });
 });

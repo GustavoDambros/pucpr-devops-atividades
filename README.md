@@ -133,7 +133,9 @@ novo entrar sem teste.
 
 ### CI — [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
-Dispara em **todo push e em toda pull request**. Para cada versão do Node (22 e
+Dispara em **todo push e em toda pull request**. Dentro de uma pull request já
+aberta, o evento `synchronize` garante que a suíte roda de novo **a cada novo
+commit** enviado ao branch. Para cada versão do Node (22 e
 24), instala as dependências a partir do lockfile, roda a suíte com cobertura,
 sobe a API de verdade e faz um smoke test em `/health` e `/api/convert` — isso
 garante que o processo realmente inicia, não apenas que as funções passam nos

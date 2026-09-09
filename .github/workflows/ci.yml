@@ -8,6 +8,10 @@ on:
     branches: ['**']
   pull_request:
     branches: ['**']
+    # Estes três já são o padrão do GitHub para pull_request, mas ficam
+    # explícitos porque "synchronize" é o que importa aqui: é ele que dispara
+    # a suíte de novo a cada novo commit enviado a uma PR já aberta.
+    types: [opened, synchronize, reopened]
   workflow_call:
 
 permissions:
@@ -25,10 +29,10 @@ jobs:
 
     steps:
       - name: Baixa o código do repositório
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configura o Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
@@ -65,7 +69,7 @@ jobs:
 
       - name: Guarda o relatório de cobertura como artefato
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cobertura-node-${{ matrix.node-version }}
           path: coverage/

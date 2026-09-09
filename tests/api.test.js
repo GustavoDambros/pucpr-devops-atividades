@@ -72,6 +72,13 @@ describe('POST /api/convert', () => {
     expect(res.body.result).toBeCloseTo(100, 1);
   });
 
+  it('responde 400 quando o corpo traz uma moeda desconhecida', async () => {
+    const res = await request(app).post('/api/convert').send({ from: 'USD', to: 'XYZ', amount: 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/não suportada/);
+  });
+
   it('responde 400 quando o corpo não é um JSON válido', async () => {
     const res = await request(app)
       .post('/api/convert')
