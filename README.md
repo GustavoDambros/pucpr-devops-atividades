@@ -157,13 +157,41 @@ quality-gate (reusa o CI)  ->  image (build + smoke test + push)  ->  deploy (va
   job de entrega baixa a imagem **pelo digest** e confirma que ela sobe e
   responde. O que é validado é exatamente o artefato entregue.
 
+### Alertas no Discord — [`.github/workflows/notify.yml`](.github/workflows/notify.yml)
+
+Sempre que o CI ou o CD termina, um embed é publicado em um canal do Discord
+com repositório, branch, evento, autor do commit, quem disparou, o resumo do
+commit com link e o link direto para os logs da execução. A cor acompanha o
+resultado: verde para sucesso, vermelho para falha, cinza para cancelado.
+
+O gatilho é `workflow_run`, e não `push`/`pull_request`, porque a notificação
+precisa saber o **resultado** de outra execução — disparando em `push` ela
+rodaria em paralelo ao CI, sem ter como saber se a suíte passou. Como o CI já
+roda em push e em pull request, os dois casos ficam cobertos.
+
+#### Configuração
+
+A URL do webhook nunca fica no repositório: vem de `secrets.DISCORD_WEBHOOK`.
+
+1. No Discord, na engrenagem do canal → **Integrações** → **Webhooks** →
+   **Criar Webhook** → **Copiar URL do Webhook** → **Salvar Alterações**.
+2. No GitHub, em **Settings → Secrets and variables → Actions** →
+   **New repository secret**, com o nome `DISCORD_WEBHOOK` e a URL como valor.
+
+Sem o secret cadastrado, o workflow registra um aviso e termina verde, em vez
+de falhar — um alerta não entregue não é um build quebrado.
+
+> A URL do webhook é uma credencial: quem a tem consegue postar no canal. Se
+> vazar, exclua o webhook no Discord e crie outro.
+
 ## Estrutura
 
 ```
 .
 ├── .github/workflows/
 │   ├── ci.yml           # integração contínua
-│   └── cd.yml           # entrega contínua
+│   ├── cd.yml           # entrega contínua
+│   └── notify.yml       # alertas no Discord
 ├── src/
 │   ├── app.js           # rotas, 404 e tratamento central de erros
 │   ├── server.js        # bootstrap HTTP e encerramento gracioso
@@ -193,6 +221,7 @@ quality-gate (reusa o CI)  ->  image (build + smoke test + push)  ->  deploy (va
 | `Dockerfile` na raiz, base oficial leve | [`Dockerfile`](Dockerfile) |
 | `.dockerignore` | [`.dockerignore`](.dockerignore) |
 | Desafio opcional: push da imagem para um registry | Job `image` do [`cd.yml`](.github/workflows/cd.yml), publicando no `ghcr.io` |
+| Alertas de workflow no Discord (semana 6) | [`notify.yml`](.github/workflows/notify.yml), com a URL em `secrets.DISCORD_WEBHOOK` |
 
 ## Licença
 
