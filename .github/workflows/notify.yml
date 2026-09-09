@@ -24,7 +24,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Verifica se o webhook está configurado
+        id: webhook
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          # Sem o secret, avisa e segue em frente. Um alerta que não pôde ser
+          # entregue não é motivo para marcar a execução como falha — quem
+          # olha o vermelho no Actions precisa confiar que é o build quebrado.
+          if [ -z "${DISCORD_WEBHOOK}" ]; then
+            echo "::warning::O secret DISCORD_WEBHOOK não está configurado. Nenhuma notificação será enviada."
+            echo "configurado=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configurado=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Monta e envia a mensagem
+        if: steps.webhook.outputs.configurado == 'true'
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           # Todo dado vindo do evento entra por variável de ambiente, nunca
