@@ -1,0 +1,115 @@
+name: Alertas no Discord
+
+# Dispara quando o CI ou o CD termina, em qualquer branch — inclusive nas
+# execuções abertas por pull request, já que são o CI e o CD que rodam nelas.
+#
+# Por que workflow_run e não push/pull_request direto: este workflow precisa
+# saber o *resultado* de outra execução. Com push/pull_request ele rodaria em
+# paralelo ao CI e não teria como saber se a suíte passou. Além disso,
+# workflow_run sempre executa a versão que está na branch padrão e com acesso
+# aos secrets, o que mantém a notificação funcionando mesmo para PRs vindas de
+# forks — onde secrets não são expostos ao workflow da PR.
+on:
+  workflow_run:
+    workflows: [CI, CD]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notificar:
+    name: Notifica o Discord
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Monta e envia a mensagem
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          # Todo dado vindo do evento entra por variável de ambiente, nunca
+          # interpolado direto no script. A mensagem de commit é conteúdo
+          # controlado por quem abre a PR: interpolar ${{ }} dentro do shell
+          # permitiria injeção de comando.
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name || github.workflow }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion || 'manual' }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          EVENT: ${{ github.event.workflow_run.event || github.event_name }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number || github.run_number }}
+          COMMIT_AUTHOR: ${{ github.event.workflow_run.head_commit.author.name || github.actor }}
+          COMMIT_MESSAGE: ${{ github.event.workflow_run.head_commit.message || 'Execução manual do workflow de alertas' }}
+          COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          TRIGGERED_BY: ${{ github.event.workflow_run.actor.login || github.actor }}
+          RUN_URL: ${{ github.event.workflow_run.html_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}
+        run: |
+          set -euo pipefail
+
+          case "${CONCLUSION}" in
+            success)   COR=3066993;  ICONE="✅"; RESULTADO="Sucesso"   ;;
+            failure)   COR=15158332; ICONE="❌"; RESULTADO="Falhou"    ;;
+            cancelled) COR=9807270;  ICONE="⚪"; RESULTADO="Cancelado" ;;
+            timed_out) COR=15105570; ICONE="⏱️"; RESULTADO="Timeout"   ;;
+            *)         COR=3447003;  ICONE="ℹ️"; RESULTADO="${CONCLUSION}" ;;
+          esac
+
+          # Só a primeira linha do commit, sem CR do Windows e truncada: o
+          # Discord recusa campos de embed com mais de 1024 caracteres.
+          RESUMO_COMMIT=$(printf '%s' "${COMMIT_MESSAGE}" | tr -d '\r' | head -n 1 | cut -c1-120)
+          if [ -z "${RESUMO_COMMIT}" ]; then
+            RESUMO_COMMIT="(sem mensagem de commit)"
+          fi
+
+          SHA_CURTO=$(printf '%s' "${COMMIT_SHA}" | cut -c1-7)
+          COMMIT_URL="${GITHUB_SERVER_URL}/${REPO}/commit/${COMMIT_SHA}"
+          BRANCH_URL="${GITHUB_SERVER_URL}/${REPO}/tree/${BRANCH}"
+
+          # jq monta o JSON: escapa aspas, quebras de linha e acentos que
+          # apareçam na mensagem de commit sem quebrar o payload.
+          PAYLOAD=$(jq -n \
+            --arg titulo "${ICONE} ${WORKFLOW_NAME} #${RUN_NUMBER} — ${RESULTADO}" \
+            --arg run_url "${RUN_URL}" \
+            --argjson cor "${COR}" \
+            --arg repo "${REPO}" \
+            --arg repo_url "${GITHUB_SERVER_URL}/${REPO}" \
+            --arg branch "${BRANCH}" \
+            --arg branch_url "${BRANCH_URL}" \
+            --arg evento "${EVENT}" \
+            --arg autor "${COMMIT_AUTHOR}" \
+            --arg disparou "${TRIGGERED_BY}" \
+            --arg sha "${SHA_CURTO}" \
+            --arg commit_url "${COMMIT_URL}" \
+            --arg commit "${RESUMO_COMMIT}" \
+            '{
+              username: "GitHub Actions",
+              embeds: [{
+                title: $titulo,
+                url: $run_url,
+                color: $cor,
+                fields: [
+                  { name: "Repositório", value: ("[" + $repo + "](" + $repo_url + ")"), inline: true },
+                  { name: "Branch",      value: ("[" + $branch + "](" + $branch_url + ")"), inline: true },
+                  { name: "Evento",      value: $evento, inline: true },
+                  { name: "Autor do commit", value: $autor, inline: true },
+                  { name: "Disparado por",   value: $disparou, inline: true },
+                  { name: "Commit", value: ("[`" + $sha + "`](" + $commit_url + ") " + $commit) },
+                  { name: "Execução", value: ("[Ver os logs no GitHub Actions](" + $run_url + ")") }
+                ],
+                footer: { text: "PUCPR • DevOps • Conversor de Moedas" },
+                timestamp: (now | todate)
+              }]
+            }')
+
+          CODIGO=$(curl -sS -o /tmp/discord-resposta.txt -w '%{http_code}' \
+            -X POST \
+            -H "Content-Type: application/json" \
+            --data "${PAYLOAD}" \
+            "${DISCORD_WEBHOOK}")
+
+          if [ "${CODIGO}" -ge 200 ] && [ "${CODIGO}" -lt 300 ]; then
+            echo "Discord respondeu ${CODIGO} — notificação entregue."
+          else
+            echo "::error::O Discord recusou a notificação (HTTP ${CODIGO})."
+            cat /tmp/discord-resposta.txt
+            exit 1
+          fi
